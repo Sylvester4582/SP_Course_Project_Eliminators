@@ -1,69 +1,114 @@
 clear;
 clc;
 
-% Task 1: Find loud words from the audio file without start time and end time given
+% Task-2 Audio Segmentation and Loud Word Detection without Timestamps
 
-% First we read the audio file
-[audioSignal, fs] = audioread('./audios/6.wav'); 
+% Read the audio file
+[audioSignal, fs] = audioread('./audios/9.mp3');
 
-% Then from the text file we get the words, start time and end time
-fileID = fopen('./text/6.txt', 'r'); 
-data = textscan(fileID, '%s %f %f %f', 'Delimiter', ' \t', 'MultipleDelimsAsOne', true);
+% Convert to mono if stereo
+if size(audioSignal, 2) > 1
+    audioSignal = mean(audioSignal, 2);  % Convert stereo to mono by averaging channels
+end
+
+% Read from text file
+fileID = fopen('./text/9.txt', 'r');
+data = textscan(fileID, '%s %f %f %d', 'Delimiter', ' \t', 'MultipleDelimsAsOne', true);
 fclose(fileID);
 
-words = data{1};
+% Extract words, start times, and end times
+words = data{1}; 
 
-%  We determine the no. of letters in each word and find total no. of letters
-numLetters = cellfun(@length, words);
-totalLetters = sum(numLetters); 
+% Preprocessing: Energy-based Voice Activity Detection (VAD)
+% Compute short-time energy
+window_duration = 0.025;  % 25 ms window
+window_samples = round(window_duration * fs);
+hop_length = round(window_samples / 2);  % 50% overlap
 
-% Then we divide the audio signal according to no. of words in the audio and each segment length is set proportional to no. of letters in each word
-segmentProportions = numLetters / totalLetters; % Proportion of audio for each word
-segmentLengths = round(segmentProportions * (length(audioSignal)-0.44*fs)); 
-
-threshold = 0.1; 
-
-loudness = zeros(1, length(words));
-rms = zeros(1, length(words));
-
-% Here we set an initial start time (By hearing all the audios, the minimum start time was 0.44s)
-start_index = floor(0.44*fs);
-for i = 1:length(words)
-    % End index is calculated according to segmentation length calculated above
-    end_index = min(start_index + segmentLengths(i) - 1, length(audioSignal)); 
+% Compute energy for each window
+energy = zeros(1, ceil(length(audioSignal) / hop_length));
+for i = 1:length(energy)
+    start_idx = 1 + (i-1) * hop_length;
+    end_idx = min(start_idx + window_samples - 1, length(audioSignal));
     
-    % We calculate the rms of the segment of the segment
-    segment = audioSignal(start_index:end_index);
-    rms_energy = sqrt(mean(segment.^2));
-    rms(i) = rms_energy;
-    
-    % Then we compare the rms energy with the threshold to determine loud word or not
-    if rms_energy > threshold
-        loudness(i) = 1;
-    else
-        loudness(i) = 0;
-    end
-    
-    start_index = end_index + 1;
+    window = audioSignal(start_idx:end_idx);
+    energy(i) = sum(window.^2);
 end
 
-% Printing the final result
+% Normalize energy
+energy = energy / max(energy);
+energy = movmean(energy,1);
+
+% Thresholding to detect speech regions
+energy_threshold = 0.01;  % Adjust based on your audio
+speech_regions = energy > energy_threshold;
+
+% Convert to sample indices
+speech_segments = find(diff([0, speech_regions, 0]) ~= 0);
+speech_segments = reshape(speech_segments, 2, [])';
+speech_segments = speech_segments * hop_length;
+
+% RMS and Loudness Analysis
+rms = zeros(1, size(speech_segments, 1));
+loudness = zeros(1, size(speech_segments, 1));
+
+% Adjust number of segments to match number of words if necessary
+if size(speech_segments, 1) > length(words)
+    speech_segments = speech_segments(1:length(words), :);
+elseif size(speech_segments, 1) < length(words)
+    % Pad with zeros if not enough segments
+    speech_segments = [speech_segments; zeros(length(words) - size(speech_segments, 1), 2)];
+end
+
+% Loud word detection
+rms_threshold = 0.12;  
+
+for i = 1:size(speech_segments, 1)
+    % Ensure valid segment
+    if speech_segments(i,1) > 0 && speech_segments(i,2) <= length(audioSignal)
+        % Extract audio segment
+        segment = audioSignal(speech_segments(i,1):speech_segments(i,2));
+        
+        % Calculate RMS energy
+        rms_energy = sqrt(mean(segment.^2));
+        rms(i) = rms_energy;
+        
+        % Determine loudness
+        if rms_energy > rms_threshold
+            loudness(i) = 1;
+        else
+            loudness(i) = 0;
+        end
+    end
+end
+
+% Print results
 fprintf("Word       | Energy (RMS)     | Loudness\n");
 fprintf("--------------------------------------------\n");
-
-for i = 1:length(words)
+for i = 1:min(length(words), length(rms))
     fprintf("%-10s | %-16f | %d\n", words{i}, rms(i), loudness(i));
 end
+disp("--------------------------------------------")
 
-t=0:1/fs:(length(audioSignal)-1)/fs;
+% Visualization
+bar(rms);
+hold on;
+yline(rms_threshold, 'r--', 'LineWidth', 2, 'Label', 'Threshold');
+title('RMS Energy per Speech Segment');
+xlabel('Speech Segments');
+ylabel('RMS Energy');
+if length(words) <= 20
+    xticks(1:length(words));
+    xticklabels(words);
+    xtickangle(45);
+end
+hold off;
+
 figure;
-subplot(2,1,1)
-plot(t,audioSignal);
-xlabel('t')
-ylabel('Audio Signal')
-
-subplot(2,1,2)
-plot(rms)
-ylabel('rms-energy')
-xlabel('word-index');
-
+plot(energy);
+hold on;
+yline(energy_threshold, 'r--', 'LineWidth', 2, 'Label', 'Energy Threshold');
+title('Energy Envelope');
+xlabel('Time Windows');
+ylabel('Normalized Energy');
+hold off;

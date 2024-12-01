@@ -1,54 +1,72 @@
 clear;
 clc;
-
 % Task 1: Find loud words from the audio file with start time and end time given
 
-% First we read the audio file
-[audioSignal, fs] = audioread('./audios/6.wav'); 
+% Read the audio file
+[audioSignal, fs] = audioread('./audios/9.mp3');
 
 % Convert to mono if stereo
 if size(audioSignal, 2) > 1
     audioSignal = mean(audioSignal, 2);  % Convert stereo to mono by averaging channels
 end
 
-% Then from the text file we get the words, start time and end time
-fileID = fopen('./text/6.txt', 'r'); 
-data = textscan(fileID, '%s %f %f %f', 'Delimiter', ' \t', 'MultipleDelimsAsOne', true);
+% Read word timings from text file
+fileID = fopen('./text/9.txt', 'r');
+data = textscan(fileID, '%s %f %f %d', 'Delimiter', ' \t', 'MultipleDelimsAsOne', true);
 fclose(fileID);
 
-words = data{1};
-start_time = data{2};
-end_time = data{3};
+% Extract words, start times, and end times
+words = data{1}; 
+start_time = data{2}; 
+end_time = data{3}; 
 
-loudness=zeros(1,length(words));
-rms=zeros(1,length(words));
+% Initialize arrays for loudness and RMS values
+loudness = zeros(1, length(words));
+rms = zeros(1, length(words));
 
-% We set a threshold for rms energy to determine the loud word
-threshold = 0.112;
+% Set threshold for RMS energy to determine loud words
+threshold = 0.1;
 
+% Process each word segment
 for i = 1:length(start_time)
-    %  We set the start and end index using the start and end time
+    % Calculate start and end indices
     start_index = floor(start_time(i) * fs) + 1;
-    end_index = (floor(end_time(i) * fs));
+    end_index = floor(end_time(i) * fs);
     
-    % We calculate the rms energy of the word
+    % Extract audio segment
     segment = audioSignal(start_index:end_index);
-    rms_energy = sqrt(mean(segment.^2));
-    rms(i)=rms_energy;
     
-    % Then we compare the rms energy with the threshold to determine loud word or not
+    % Calculate RMS energy
+    rms_energy = sqrt(mean(segment.^2));
+    rms(i) = rms_energy;
+    
+    % Determine if word is loud based on threshold
     if rms_energy > threshold
-        loudness(i)=1;
+        loudness(i) = 1;
     else
-        loudness(i)=0;
+        loudness(i) = 0;
     end
 end
 
-% Printing the final result
+% Print results in a formatted table
 fprintf("Word       | Energy (RMS)     | Loudness\n");
 fprintf("--------------------------------------------\n");
-
 for i = 1:length(words)
     fprintf("%-10s | %-16f | %d\n", words{i}, rms(i), loudness(i));
 end
+disp("--------------------------------------------")
 
+% Plot bar graph of RMS values with words on x-axis
+figure;
+bar(rms);
+hold on;
+% Add a horizontal line for the threshold across the entire plot
+yline(threshold, 'r--', 'LineWidth', 2, 'Label', 'Threshold');
+title('Word RMS Energy');
+xlabel('Words');
+ylabel('RMS Energy');
+xticks(1:length(words));
+xticklabels(words);
+xtickangle(45);
+legend('RMS Energy', 'Location', 'best');
+hold off;
